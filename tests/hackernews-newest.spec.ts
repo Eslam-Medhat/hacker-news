@@ -34,23 +34,14 @@ async function readPageArticles(page: Page): Promise<Article[]> {
     );
 }
 
-// How long to wait before each reload when HN throttles us (up to 100s in total).
-const THROTTLE_BACKOFF_MS = [10_000, 20_000, 30_000, 40_000];
+const waitTimes = [10_000, 20_000, 30_000, 40_000];
 
-// HN answers rapid requests with a page that has no articles and says
-// "Sorry, we're not able to serve your requests this quickly." or just "Sorry.".
-async function isThrottled(page: Page): Promise<boolean> {
-  const hasArticles = (await page.locator("tr.athing.submission").count()) > 0;
-  if (hasArticles) return false;
-  return /sorry/i.test(await page.locator("body").innerText());
-}
-
-async function reloadIfThrottled(page: Page): Promise<void> {
+async function waitForArticles(page: Page): Promise<void> {
   await page.waitForLoadState("load");
-  for (const delay of THROTTLE_BACKOFF_MS) {
-    if (!(await isThrottled(page))) return;
+  for (const wait of waitTimes) {
+    if ((await page.locator("tr.athing.submission").count()) > 0) return;
 
-    await page.waitForTimeout(delay);
+    await page.waitForTimeout(wait);
     await page.reload();
   }
 }
@@ -60,26 +51,20 @@ async function collectArticles(page: Page, count: number): Promise<Article[]> {
   const articles: Article[] = [];
 
   await page.goto("/newest");
-  await reloadIfThrottled(page);
 
   while (articles.length < count) {
-    let added = 0;
+    await waitForArticles(page);
+
+    let counted = 0;
     for (const article of await readPageArticles(page)) {
       if (!seen.has(article.id)) {
         seen.add(article.id);
         articles.push(article);
-        added++;
+        counted++;
       }
     }
 
-    if (added === 0) {
-      // Show what the server actually returned (e.g. a rate-limit or block page).
-      const pageText = (await page.locator("body").innerText()).slice(0, 300);
-      throw new Error(
-        `No new articles on ${page.url()} after ${articles.length} collected. ` +
-          `Page text: ${JSON.stringify(pageText)}`,
-      );
-    }
+    expect(counted).toBeGreaterThan(0);
 
     if (articles.length >= count) break;
 
@@ -91,7 +76,6 @@ async function collectArticles(page: Page, count: number): Promise<Article[]> {
       urlBefore,
     );
     await expect(page).toHaveURL(/next/);
-    await reloadIfThrottled(page);
   }
 
   return articles.slice(0, count);
