@@ -34,16 +34,23 @@ async function readPageArticles(page: Page): Promise<Article[]> {
     );
 }
 
-const THROTTLE_TEXT = /not able to serve your requests this quickly/i;
-const MAX_THROTTLE_RETRIES = 3;
+// How long to wait before each reload when HN throttles us (up to 100s in total).
+const THROTTLE_BACKOFF_MS = [10_000, 20_000, 30_000, 40_000];
+
+// HN answers rapid requests with a page that has no articles and says
+// "Sorry, we're not able to serve your requests this quickly." or just "Sorry.".
+async function isThrottled(page: Page): Promise<boolean> {
+  const hasArticles = (await page.locator("tr.athing.submission").count()) > 0;
+  if (hasArticles) return false;
+  return /sorry/i.test(await page.locator("body").innerText());
+}
 
 async function reloadIfThrottled(page: Page): Promise<void> {
   await page.waitForLoadState("load");
-  for (let attempt = 1; attempt <= MAX_THROTTLE_RETRIES; attempt++) {
-    const bodyText = await page.locator("body").innerText();
-    if (!THROTTLE_TEXT.test(bodyText)) return;
+  for (const delay of THROTTLE_BACKOFF_MS) {
+    if (!(await isThrottled(page))) return;
 
-    await page.waitForTimeout(attempt * 5_000);
+    await page.waitForTimeout(delay);
     await page.reload();
   }
 }
