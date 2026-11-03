@@ -50,7 +50,14 @@ async function collectArticles(page: Page, count: number): Promise<Article[]> {
       }
     }
 
-    expect(added).toBeGreaterThan(0);
+    if (added === 0) {
+      // Show what the server actually returned (e.g. a rate-limit or block page).
+      const pageText = (await page.locator("body").innerText()).slice(0, 300);
+      throw new Error(
+        `No new articles on ${page.url()} after ${articles.length} collected. ` +
+          `Page text: ${JSON.stringify(pageText)}`,
+      );
+    }
 
     if (articles.length >= count) break;
 
