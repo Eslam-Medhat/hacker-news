@@ -5,7 +5,7 @@ const ARTICLE_COUNT = 100;
 interface Article {
   id: string;
   title: string;
-  submittedAt: number; // epoch ms
+  submittedAt: number;
   rawTimestamp: string;
 }
 
@@ -34,11 +34,26 @@ async function readPageArticles(page: Page): Promise<Article[]> {
     );
 }
 
+const THROTTLE_TEXT = /not able to serve your requests this quickly/i;
+const MAX_THROTTLE_RETRIES = 3;
+
+async function reloadIfThrottled(page: Page): Promise<void> {
+  await page.waitForLoadState("load");
+  for (let attempt = 1; attempt <= MAX_THROTTLE_RETRIES; attempt++) {
+    const bodyText = await page.locator("body").innerText();
+    if (!THROTTLE_TEXT.test(bodyText)) return;
+
+    await page.waitForTimeout(attempt * 5_000);
+    await page.reload();
+  }
+}
+
 async function collectArticles(page: Page, count: number): Promise<Article[]> {
   const seen = new Set<string>();
   const articles: Article[] = [];
 
   await page.goto("/newest");
+  await reloadIfThrottled(page);
 
   while (articles.length < count) {
     let added = 0;
@@ -69,6 +84,7 @@ async function collectArticles(page: Page, count: number): Promise<Article[]> {
       urlBefore,
     );
     await expect(page).toHaveURL(/next/);
+    await reloadIfThrottled(page);
   }
 
   return articles.slice(0, count);
